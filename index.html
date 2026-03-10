@@ -1,0 +1,717 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Прайс-лист комплектуючих</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+
+        /* Прибираємо стрілки з полів вводу number */
+        input[type=number]::-webkit-inner-spin-button,
+        input[type=number]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type=number] {
+            -moz-appearance: textfield;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .spinner {
+            animation: spin 1s linear infinite;
+        }
+        
+        /* Динамічне масштабування шрифту для прев'ю */
+        .price-list-container.dynamic-font-scaling .dynamic-title-main {
+            font-size: clamp(2rem, 4vw, 3rem); 
+        }
+        
+        .price-list-container.dynamic-font-scaling .dynamic-item-text {
+            font-size: clamp(1.125rem, 1.75vw, 1.5rem); 
+        }
+
+        /* Стилі для редагованої дати */
+        .editable-date {
+            font-weight: 500;
+            cursor: pointer;
+            display: inline-block;
+            border-bottom: 1px dashed #9ca3af;
+        }
+        .editable-date:hover {
+            text-decoration: none;
+            border-bottom-style: solid;
+            color: #2563eb;
+        }
+
+        /* Стилі для спойлера (Інструкції) */
+        .spoiler-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.5s ease-in-out;
+            border-top: none !important; 
+        }
+        .spoiler-content.open {
+            /* Висота має бути достатньою, але не надто великою */
+            max-height: 800px; 
+        }
+        .spoiler-dynamic-content {
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            overflow-wrap: break-word;
+        }
+        .spoiler-dynamic-content.active {
+            opacity: 1;
+        }
+        
+        /* Для друку/PDF ховаємо зайве */
+        @media print {
+            .no-print, .editor-panel, #notificationArea {
+                display: none !important;
+            }
+            .preview-panel {
+                width: 100% !important;
+            }
+        }
+    </style>
+</head>
+
+<body class="p-4 md:p-8">
+    <!-- Область для сповіщень (наприклад, про помилку PDF) -->
+    <div id="notificationArea" class="fixed top-4 right-4 z-50 w-72 space-y-2 pointer-events-none"></div>
+
+    <div class="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-5 gap-8 mb-8 w-full">
+        <!-- Панель редагування (ліва частина) -->
+        <div class="editor-panel md:col-span-2 space-y-6">
+            
+            <!-- Блок вибору варіанту та вводу цін -->
+            <div class="bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">Налаштування</h2>
+                <!-- Кнопки вибору варіанту -->
+                <div class="flex space-x-2 mb-4">
+                    <button id="btn-Тіс" onclick="змінитиВаріант('Тіс')" class="variant-btn flex-1 py-2 px-3 text-sm font-medium rounded-lg transition duration-200 bg-gray-900 text-white uppercase shadow-md hover:shadow-lg">Тіс</button>
+                    <button id="btn-LM" onclick="змінитиВаріант('LM')" class="variant-btn flex-1 py-2 px-3 text-sm font-medium rounded-lg transition duration-200 bg-gray-200 text-gray-700 hover:bg-gray-300 uppercase">LM</button>
+                    <button id="btn-Indo" onclick="змінитиВаріант('Indo')" class="variant-btn flex-1 py-2 px-3 text-sm font-medium rounded-lg transition duration-200 bg-gray-200 text-gray-700 hover:bg-gray-300 uppercase">Indo</button>
+                </div>
+                <!-- Поля вводу аксесуарів -->
+                <div class="space-y-4" id="accessoryInputs">
+                    <!-- Динамічно заповнюється JS -->
+                </div>
+            </div>
+
+            <!-- Блок керування PDF -->
+            <div class="pdf-controls-block bg-white p-6 rounded-xl shadow-lg border border-gray-200">
+                <h2 class="text-xl font-bold text-gray-800 mb-4">Експорт у PDF</h2>
+                <div class="flex flex-col space-y-4">
+                    <button id="openPdfBtn" onclick="відкритиPdf()" class="h-14 px-4 rounded-xl text-white font-semibold shadow-lg transition duration-300 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
+                        <span id="openPdfText" class="whitespace-nowrap">Відкрити PDF</span>
+                    </button>
+                    <button id="downloadPdfBtn" onclick="завантажитиPdf()" class="h-14 px-4 rounded-xl text-white font-semibold shadow-lg transition duration-300 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center">
+                        <span id="downloadPdfText" class="whitespace-nowrap">Завантажити PDF</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Область попереднього перегляду (права частина) -->
+        <div class="preview-panel md:col-span-3">
+            <div id="priceListPreview" class="price-list-container bg-white p-8 md:p-12 rounded-xl shadow-2xl border-4 border-gray-300 max-w-full lg:max-w-3xl mx-auto flex flex-col">
+                <!-- Динамічно заповнюється JS -->
+            </div>
+        </div>
+    </div>
+    
+    <!-- Інструкція та інформаційний блок -->
+    <div class="w-full max-w-7xl mx-auto mt-6 no-print mb-8">    
+        <div class="flex flex-col gap-4">        
+            <div>          
+                <button id="spoiler-trigger-1" class="w-full p-3 text-center font-semibold rounded-lg bg-gray-300 hover:bg-gray-400 text-gray-700 transition duration-150 shadow focus:outline-none focus:ring-2 focus:ring-gray-400">Інструкція з використання</button>          
+                <div id="spoiler-content-1" class="text-sm spoiler-content shadow-xl rounded-b-lg">            
+                    <div class="spoiler-dynamic-content p-4 text-left text-gray-700 bg-white border border-gray-300 border-t-0"></div>          
+                </div>        
+            </div>        
+            <div>          
+                <button id="spoiler-trigger-2" class="w-full p-3 text-center font-semibold rounded-lg bg-gray-300 hover:bg-gray-400 text-gray-700 transition duration-150 shadow focus:outline-none focus:ring-2 focus:ring-gray-400">Згенерував Shans для Вiста</button>          
+                <div id="spoiler-content-2" class="text-sm spoiler-content shadow-xl rounded-b-lg">            
+                    <div class="spoiler-dynamic-content p-4 text-left text-gray-700 bg-white border border-gray-300 border-t-0"></div>          
+                </div>        
+            </div>      
+        </div>  
+    </div>
+
+    <script>
+        let ціниАксесуарів = {};
+        let поточнийВаріант = 'Тіс';
+        let обробляється = false;
+        let датаВідображення = new Date();
+
+        // Групування полів вводу для UI
+        const ПОЛЯ_ВВОДУ_АКСЕСУАРІВ = [
+            // Введене значення застосовується до обох ключів (внутрішній та зовнішній кут)
+            { key: 'corners', label: 'Кут (Внутрішній / Зовнішній)', keysToUpdate: ['internalCorner', 'externalCorner'] },
+            // Введене значення застосовується до всіх трьох ключів (закінчення та з'єднання)
+            { key: 'capsAndConnector', label: 'Закінчення / З\'єднання', keysToUpdate: ['leftEndCap', 'rightEndCap', 'connector'] }
+        ];
+
+        // Комплектуючі, які відображаються в прайс-листі
+        const КОМПЛЕКТУЮЧІ_ДЛЯ_ПРЕВЬЮ = [
+            { key: 'internalCorner', label: 'Кут внутрішній' },
+            { key: 'externalCorner', label: 'Кут зовнішній' },
+            { key: 'leftEndCap', label: 'Закінчення ліве' },
+            { key: 'rightEndCap', label: 'Закінчення праве' },
+            { key: 'connector', label: 'З\'єднання' },
+        ];
+
+        // --- Утиліти UI ---
+
+        /**
+         * Показує спливаюче сповіщення.
+         * @param {string} повідомлення - Текст сповіщення.
+         * @param {'інфо' | 'помилка'} тип - Тип сповіщення (визначає колір).
+         */
+        function показатиСповіщення(повідомлення, тип = 'інфо') {
+            const областьСповіщень = document.getElementById('notificationArea');
+            const колір = тип === 'помилка' ? 'bg-red-500' : 'bg-green-500';
+            
+            const сповіщення = document.createElement('div');
+            сповіщення.className = `p-4 rounded-lg shadow-xl text-white font-semibold ${колір} transform transition-all duration-300 ease-out translate-x-0 pointer-events-auto`;
+            сповіщення.textContent = повідомлення;
+            
+            областьСповіщень.appendChild(сповіщення);
+
+            setTimeout(() => {
+                сповіщення.classList.add('opacity-0', 'translate-x-full');
+                сповіщення.addEventListener('transitionend', () => сповіщення.remove());
+            }, 5000);
+        }
+
+        /**
+         * Відформатовує ціну у грн.
+         * @param {string | number | undefined} ціна - Ціна.
+         * @returns {string} Відформатований рядок або '—'.
+         */
+        function відформатуватиЦіну(ціна) {
+            const п = parseFloat(ціна);
+            if (isNaN(п) || п <= 0) return '—';
+            // Локалізація для української мови з двома знаками після коми (якщо це не ціле число)
+            return п.toLocaleString('uk-UA', { minimumFractionDigits: п % 1 === 0 ? 0 : 2, maximumFractionDigits: 2 }) + ' грн';
+        }
+        
+        /** Спінер для кнопок PDF. */
+        const спінерSvg = `<svg class="spinner h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
+        
+        /**
+         * Оновлює вигляд кнопок PDF під час генерації.
+         * @param {boolean} вимкнено - Чи вимкнути кнопки (показати спінер).
+         */
+        function оновитиКнопкиPdf(вимкнено) {
+            обробляється = вимкнено;
+            const кнопкаВідкрити = document.getElementById('openPdfBtn');
+            const кнопкаЗавантажити = document.getElementById('downloadPdfBtn');
+            const текстВідкрити = document.getElementById('openPdfText');
+            const текстЗавантажити = document.getElementById('downloadPdfText');
+
+            if (!кнопкаВідкрити || !кнопкаЗавантажити || !текстВідкрити || !текстЗавантажити) return;
+
+            кнопкаВідкрити.disabled = вимкнено;
+            кнопкаЗавантажити.disabled = вимкнено;
+            
+            if (вимкнено) {
+                const завантаженняHtml = `<div class="flex items-center justify-center text-sm"><span class="mr-2">${спінерSvg}</span><span class="whitespace-nowrap">Генерую PDF...</span></div>`;
+                текстВідкрити.innerHTML = завантаженняHtml;
+                текстЗавантажити.innerHTML = завантаженняHtml;
+            } else {
+                текстВідкрити.textContent = 'Відкрити PDF';
+                текстЗавантажити.textContent = 'Завантажити PDF'; 
+            }
+        }
+        
+        // --- Логіка дати ---
+
+        /**
+         * Форматує об'єкт Date для відображення у прев'ю (повний текстовий формат).
+         */
+        function відформатуватиДату(дата) {
+            return дата.toLocaleDateString('uk-UA', { year: 'numeric', month: 'long', day: 'numeric' });
+        }
+
+        /**
+         * Форматує об'єкт Date для вводу (ДД.ММ.РРРР).
+         */
+        function відформатуватиВведенуДату(дата) {
+            const д = String(дата.getDate()).padStart(2, '0');
+            const м = String(дата.getMonth() + 1).padStart(2, '0');
+            const р = дата.getFullYear();
+            return `${д}.${м}.${р}`;
+        }
+        
+        /**
+         * Перетворює рядок ДД.ММ.РРРР на об'єкт Date.
+         */
+        function розібратиДату(рядокДати) {
+            const частини = рядокДати.split('.');
+            if (частини.length === 3) {
+                const день = parseInt(частини[0], 10);
+                const місяць = parseInt(частини[1], 10) - 1;
+                const рік = parseInt(частини[2], 10);
+                
+                // Перевірка на валідність дати
+                if (день > 0 && місяць >= 0 && місяць < 12 && рік >= 1900 && рік <= 2100) {
+                    const новаДата = new Date(рік, місяць, день); 
+                    // Додаткова перевірка, чи не "перескочила" дата
+                    if (новаДата.getDate() === день && новаДата.getMonth() === місяць && новаДата.getFullYear() === рік) {
+                        return новаДата;
+                    }
+                }
+            }
+            return null;
+        }
+        
+        /**
+         * Обробник кліку для редагування дати в прев'ю.
+         */
+        function редагуватиДату(подія) { 
+            подія.preventDefault(); 
+            подія.stopPropagation(); 
+            
+            const елементДати = подія.target;
+            // Використовуємо формат вводу ДД.ММ.РРРР
+            const поточнийТекст = відформатуватиВведенуДату(датаВідображення); 
+
+            const полеВводу = document.createElement('input');
+            полеВводу.type = 'text';
+            полеВводу.value = поточнийТекст;
+            полеВводу.className = 'w-32 text-center text-gray-900 border-b-2 border-blue-500 focus:outline-none bg-transparent text-sm font-medium';
+            
+            
+            елементДати.replaceWith(полеВводу);
+            полеВводу.focus();
+            
+            const зберегтиДату = () => {
+                const новаДата = розібратиДату(полеВводу.value);
+                if (новаДата) {
+                    датаВідображення = новаДата;
+                    перемалюватиСписок();
+                } else {
+                    показатиСповіщення("Некоректний формат дати. Використовуйте ДД.ММ.РРРР", 'помилка');
+                    перемалюватиСписок(); // Повернути стару дату
+                }
+            };
+
+            // Збереження по blur (втраті фокусу)
+            полеВводу.addEventListener('blur', зберегтиДату);
+            // Збереження по Enter
+            полеВводу.addEventListener('keydown', (е) => {
+                if (е.key === 'Enter') {
+                    полеВводу.removeEventListener('blur', зберегтиДату);
+                    зберегтиДату();
+                }
+            });
+        }
+        
+        // --- Логіка варіантів та цін ---
+
+        /**
+         * Змінює поточний варіант (Тіс, LM, Indo).
+         */
+        function змінитиВаріант(новийВаріант) {
+            if (поточнийВаріант === новийВаріант) return;
+            
+            // Оновлення стилів кнопок
+            document.querySelectorAll('.variant-btn').forEach(кнопка => {
+                кнопка.classList.remove('bg-gray-900', 'text-white', 'shadow-md', 'hover:shadow-lg');
+                кнопка.classList.add('bg-gray-200', 'text-gray-700', 'hover:bg-gray-300');
+            });
+            
+            поточнийВаріант = новийВаріант;
+            const новаКнопка = document.getElementById(`btn-${поточнийВаріант}`);
+            if (новаКнопка) {
+                новаКнопка.classList.add('bg-gray-900', 'text-white', 'shadow-md', 'hover:shadow-lg');
+                новаКнопка.classList.remove('bg-gray-200', 'text-gray-700', 'hover:bg-gray-300');
+            }
+            
+            // Перемалювати поля вводу для ініціалізації/оновлення значень
+            перемалюватиПоляВводуАксесуарів(true);
+            перемалюватиСписок();
+        }
+
+        /**
+         * Генерує/перемальовує поля вводу цін аксесуарів.
+         */
+        function перемалюватиПоляВводуАксесуарів(перебудова = false) {
+            const контейнер = document.getElementById('accessoryInputs');
+            if (!перебудова && контейнер.children.length > 0) return; // Редагування відбувається через in-place оновлення
+
+            контейнер.innerHTML = '';
+
+            ПОЛЯ_ВВОДУ_АКСЕСУАРІВ.forEach(поле => {
+                // Використовуємо перше значення як основне для відображення у полі вводу
+                const значення = ціниАксесуарів[поле.keysToUpdate[0]] || ''; 
+                const ідентифікатор = поле.key;
+                
+                const html = `
+                    <div>
+                        <label for="${ідентифікатор}" class="block text-sm font-medium text-gray-700 mb-1">${поле.label}</label>
+                        <div class="flex rounded-md shadow-sm">
+                            <input type="number" step="0.01" min="0" id="${ідентифікатор}" value="${значення}" oninput="зберегтиЦінуАксесуара('${ідентифікатор}')"
+                                class="flex-1 min-w-0 block w-full px-3 py-2 rounded-l-md border border-gray-300 focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                                placeholder="0.00">
+                            <span class="inline-flex items-center px-3 rounded-r-md border border-l-0 border-gray-300 bg-gray-50 text-gray-500 text-sm">грн</span>
+                        </div>
+                    </div>`;
+                контейнер.insertAdjacentHTML('beforeend', html);
+            });
+        }
+
+        /**
+         * Зберігає введену ціну і оновлює прев'ю.
+         * @param {string} груповийКлюч - Ключ з ПОЛЯ_ВВОДУ_АКСЕСУАРІВ.
+         */
+        function зберегтиЦінуАксесуара(груповийКлюч) {
+            const елементВводу = document.getElementById(груповийКлюч);
+            const сиреЗначення = елементВводу.value;
+            const ціна = parseFloat(сиреЗначення);
+            const поле = ПОЛЯ_ВВОДУ_АКСЕСУАРІВ.find(i => i.key === груповийКлюч);
+            if (!поле) return;
+
+            let значенняЦіни = '';
+            // Зберігаємо лише позитивне число, інакше порожній рядок
+            if (!isNaN(ціна) && ціна > 0) значенняЦіни = сиреЗначення;
+
+            // Застосовуємо введене значення до всіх відповідних ключів комплектуючих
+            поле.keysToUpdate.forEach(ключ => {
+                ціниАксесуарів[ключ] = значенняЦіни;
+            });
+
+            перемалюватиСписок();
+        }
+
+        // --- Логіка прев'ю ---
+
+        /**
+         * Генерує HTML-вміст прайс-листа для попереднього перегляду.
+         */
+        function отриматиHtmlВмістПрайсу() {
+            const відформатованаДата = відформатуватиДату(датаВідображення); 
+            const країна = поточнийВаріант === 'Тіс' ? 'УКРАЇНА' : 'ПОЛЬЩА';
+
+            let префіксНазви = '';
+            let варіантДляВідображення = поточнийВаріант;
+            
+            if (поточнийВаріант === 'LM' || поточнийВаріант === 'Indo') {
+                префіксНазви = 'ARBITON - ';
+            }
+            
+            // Спеціальна назва для LM
+            if (поточнийВаріант === 'LM') {
+                 варіантДляВідображення = 'LM 55';
+            }
+
+            return `
+                <div class="bg-white flex flex-col justify-between"> 
+                    <!-- Заголовок -->
+                    <header class="mb-8 text-center border-b border-dashed border-gray-700 pb-4">
+                        <p class="dynamic-header text-gray-700 uppercase font-medium mb-1">КОМПЛЕКТУЮЧІ</p>
+                        <h1 class="dynamic-title-main font-extrabold text-gray-900 leading-none uppercase mb-2">${префіксНазви}${варіантДляВідображення}</h1> 
+                        <p class="dynamic-header text-gray-500 uppercase font-medium">${країна}</p>
+                    </header>
+                    
+                    <!-- Список комплектуючих -->
+                    <section class="flex-grow">
+                        <!-- Шапка таблиці -->
+                        <div class="grid grid-cols-5 text-xl font-medium text-gray-900 bg-gray-100 rounded-lg p-3 mb-4 uppercase border border-gray-200">
+                            <span class="col-span-3">Фурнітура</span>
+                            <span class="col-span-2 text-right">Ціна / шт</span>
+                        </div>
+                        
+                        <!-- Рядки даних -->
+                        <div class="space-y-0"> 
+                            ${КОМПЛЕКТУЮЧІ_ДЛЯ_ПРЕВЬЮ.map((комп) => `
+                                <div class="grid grid-cols-5 items-center py-3 px-3 border-b border-dashed border-gray-200 price-row-content hover:bg-gray-50 transition-colors">
+                                    <span class="dynamic-item-text text-gray-700 font-medium col-span-3">${комп.label}</span>
+                                    <div class="col-span-2 text-right">
+                                        <span class="dynamic-item-text text-gray-900 font-medium">${відформатуватиЦіну(ціниАксесуарів[комп.key])}</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </section>
+                    
+                    <!-- Футер (дата) -->
+                    <footer class="mt-12 text-center pt-4">
+                        <p class="text-sm text-gray-500">Актуально на: 
+                            <!-- Редагована дата -->
+                            <span class="font-medium text-gray-700 editable-date" onclick="редагуватиДату(event)" title="Натисніть, щоб змінити дату">${відформатованаДата}</span>
+                        </p>
+                    </footer>
+                </div>`;
+        }
+
+        /**
+         * Оновлює вміст області попереднього перегляду.
+         */
+        function перемалюватиСписок() {
+            const превью = document.getElementById('priceListPreview');
+            превью.classList.add('dynamic-font-scaling'); 
+            превью.innerHTML = отриматиHtmlВмістПрайсу();
+        }
+        
+        // --- Логіка PDF ---
+
+        /**
+         * Створює прихований контейнер, що імітує горизонтальний A4, з одним прайсом A5.
+         */
+        function створитиA4ГоризонтальнийКонтейнерЗОднимA5() {
+            const відформатованаДата = відформатуватиДату(датаВідображення); 
+            const країна = поточнийВаріант === 'Тіс' ? 'УКРАЇНА' : 'ПОЛЬЩА';
+            let префіксНазви = '';
+            let варіантДляВідображення = поточнийВаріант; 
+
+            if (поточнийВаріант === 'LM' || поточнийВаріант === 'Indo') {
+                префіксНазви = 'ARBITON - ';
+            }
+            if (поточнийВаріант === 'LM') {
+                 варіантДляВідображення = 'LM 55';
+            }
+
+            // Функція для генерування HTML-вмісту A5-прайсу
+            // Змінено font-family на 'Inter' для відповідності прев'ю
+            const генеруватиA5Вміст = () => `
+                <div style="height: 100%; display: flex; flex-direction: column; justify-content: space-between; font-family: 'Inter', sans-serif;">
+                    <!-- A5-Заголовок -->
+                    <header style="margin-bottom: 0.7cm; text-align: center; border-bottom: 1px dashed #374151; padding-bottom: 0.3cm;">
+                        <p style="font-size: 24pt; color: #374151; text-transform: uppercase; font-weight: 600; margin-bottom: 0.1cm;">КОМПЛЕКТУЮЧІ</p>
+                        <h1 style="font-size: 30pt; font-weight: 800; color: #111827; text-transform: uppercase; margin-bottom: 0.2cm;">${префіксНазви}${варіантДляВідображення}</h1>
+                        <p style="font-size: 20pt; color: #6b7280; text-transform: uppercase; font-weight: 500;">${країна}</p>
+                    </header>
+                    
+                    <!-- A5-Список комплектуючих -->
+                    <section style="flex-grow: 1;">
+                        <div style="display: grid; grid-template-columns: 3fr 2fr; font-size: 24pt; color: #111827; background-color: #e5e7eb; border-radius: 0.2cm; padding: 0.2cm 0.4cm; margin-bottom: 0.4cm; text-transform: uppercase;">
+                            <!-- Змінено тут: додано position: relative та top: -0.3cm -->
+                            <span style="position: relative; top: -0.3cm;">Фурнітура</span>
+                            <span style="text-align: right; position: relative; top: -0.3cm;">Ціна / шт</span>
+                        </div>
+                        
+                        <div>
+                            ${КОМПЛЕКТУЮЧІ_ДЛЯ_ПРЕВЬЮ.map((комп) => `
+                                <div style="display: grid; grid-template-columns: 3fr 2fr; align-items: center; padding: 0.25cm 0.4cm; border-bottom: 1px dashed #d1d5db;">
+                                    <!-- ТУТ МИ ПІДНЯЛИ ТЕКСТ (top: -0.3cm) -->
+                                    <span style="font-size: 22pt; color: #374151; font-weight: 500; position: relative; top: -0.3cm;">${комп.label}</span>
+                                    <div style="text-align: right;">
+                                        <span style="font-size: 22pt; color: #111827; font-weight: 500; position: relative; top: -0.3cm;">${відформатуватиЦіну(ціниАксесуарів[комп.key])}</span>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </section>
+                    
+                    <!-- A5-Футер (дата) -->
+                    <footer style="margin-top: 0.7cm; text-align: center; padding-top: 0.3cm; margin-bottom: 0.5cm;">
+                        <p style="font-size: 14pt; color: #6b7280;">Актуально на: <span style="font-weight: 500; color: #374151;">${відформатованаДата}</span></p>
+                    </footer>
+                </div>
+            `;
+            
+            // Контейнер A4
+            const контейнер = document.createElement('div');
+            // Розміри A4 landscape: 29.7cm x 21.0cm
+            контейнер.style.width = '29.7cm';
+            контейнер.style.height = '21.0cm';
+            контейнер.style.background = 'white';
+            контейнер.style.boxSizing = 'border-box'; 
+            контейнер.style.display = 'flex';
+            контейнер.style.flexDirection = 'row'; 
+            контейнер.style.alignItems = 'center'; 
+            контейнер.style.justifyContent = 'flex-start'; 
+
+            // Стилі для A5-копії
+            // Розміри A5 portrait: 14.85cm x 21.0cm
+            const стильA5 = 'width: 14.85cm; height: 21.0cm; background: white; padding: 0.8cm 1cm 1cm 1cm; box-sizing: border-box;';
+
+            // Додаємо ОДНУ копію A5 ліворуч
+            контейнер.innerHTML = `
+                <div id="a5-copy-1" style="${стильA5}; position: absolute; left: 0;">
+                    ${генеруватиA5Вміст()}
+                </div>
+            `;
+
+            return контейнер;
+        }
+
+        /**
+         * Генерує PDF-файл з вмісту.
+         * @param {'відкрити' | 'завантажити'} дія - Що робити з PDF.
+         */
+        async function генеруватиPdf(дія) {
+            if (обробляється) return;
+            оновитиКнопкиPdf(true);
+            
+            // Форматування назви файлу
+            const рік = датаВідображення.getFullYear();
+            const місяць = String(датаВідображення.getMonth() + 1).padStart(2, '0');
+            const день = String(датаВідображення.getDate()).padStart(2, '0');
+            const рядокДати = `${рік}-${місяць}-${день}`;
+            const імЯФайлу = `прайс_${поточнийВаріант}_${рядокДати}.pdf`; 
+            
+            try {
+                // 1. Створення прихованого контейнера для рендерингу
+                const контейнерPdf = створитиA4ГоризонтальнийКонтейнерЗОднимA5();
+                контейнерPdf.style.position = 'absolute';
+                контейнерPdf.style.left = '-9999px';
+                document.body.appendChild(контейнерPdf);
+                
+                // Даємо браузеру час на рендеринг (може бути не потрібно, але для надійності)
+                await new Promise(вирішити => setTimeout(вирішити, 100));
+                
+                // 2. Рендеринг HTML в Canvas
+                // Додано windowWidth/windowHeight для надійності
+                const полотно = await html2canvas(контейнерPdf, { 
+                    scale: 3, // Висока якість для друку
+                    useCORS: true,
+                    logging: false,
+                    backgroundColor: '#ffffff',
+                    width: контейнерPdf.offsetWidth,
+                    height: контейнерPdf.offsetHeight,
+                    windowWidth: контейнерPdf.offsetWidth,
+                    windowHeight: контейнерPdf.offsetHeight
+                });
+                
+                // 3. Створення PDF
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({ 
+                    unit: 'cm', 
+                    format: 'a4', 
+                    orientation: 'landscape' // A4 горизонтально
+                });
+                
+                const ширинаЗображення = 29.7;
+                const висотаЗображення = 21.0;
+                const даніЗображення = полотно.toDataURL('image/jpeg', 1.0);
+                
+                pdf.addImage(даніЗображення, 'JPEG', 0, 0, ширинаЗображення, висотаЗображення);
+                
+                // 4. Видалення прихованого контейнера
+                document.body.removeChild(контейнерPdf);
+                
+                // 5. Дія
+                if (дія === 'відкрити') {
+                    const блобPdf = pdf.output('blob');
+                    const urlБлобу = URL.createObjectURL(блобPdf);
+                    window.open(urlБлобу);
+                } else {
+                    pdf.save(імЯФайлу);
+                }
+                
+                показатиСповіщення("PDF успішно згенеровано!");
+
+            } catch (помилка) {
+                console.error("Помилка при генерації PDF:", помилка);
+                показатиСповіщення("Помилка при генерації PDF. Перевірте консоль.", 'помилка');
+            } finally {
+                оновитиКнопкиPdf(false);
+            }
+        }
+
+        // Обгортки для викликів
+        function відкритиPdf() { генеруватиPdf('відкрити'); }
+        function завантажитиPdf() { генеруватиPdf('завантажити'); }
+
+        // --- Логіка спойлерів ---
+
+        function ініціалізуватиСпойлер() {
+            const текстІнструкції = `
+                <p class="mb-2 font-bold text-gray-800">Крок 1: Введіть ціни</p>
+                <p class="mb-3">Заповніть поля "Кут (Внутрішній / Зовнішній)" та "Закінчення / З'єднання" актуальними цінами (без знака грн). Значення округлюються до двох знаків після коми. Якщо ціна 0 або поле порожнє, у прайсі буде прочерк (—).</p>
+                
+                <p class="mb-2 font-bold text-gray-800">Крок 2: Оберіть варіант</p>
+                <p class="mb-3">Виберіть потрібний варіант: <span class="font-semibold text-gray-900">"Тіс"</span>, <span class="font-semibold text-gray-900">"LM"</span> (відобразиться як LM 55) або <span class="font-semibold text-gray-900">"Indo"</span>. Назва країни автоматично змінюється на "УКРАЇНА" для Тіс та "ПОЛЬЩА" для Arbiton (LM/Indo).</p>
+                
+                <p class="mb-2 font-bold text-gray-800">Крок 3: Перевірка та Редагування</p>
+                <p class="mb-3">Перевірте відображення в області попереднього перегляду праворуч. Щоб змінити дату, натисніть на неї і введіть нову у форматі <span class="font-mono">ДД.ММ.РРРР</span>.</p>
+                
+                <p class="mb-2 font-bold text-gray-800">Крок 4: Експорт</p>
+                <ul class="list-disc ml-5 space-y-1">
+                    <li><b>Відкрити PDF</b>: Генерує документ формату А4 (альбомна орієнтація) з однією копією прайсу А5 (ліворуч) і відкриває його у новій вкладці.</li>
+                    <li><b>Завантажити PDF</b>: Зберігає готовий файл на Ваш комп'ютер (назва файлу включатиме варіант і дату).</li>
+                </ul>
+            `;
+            const текстЛіцензії = `
+                <p class='text-gray-600'>Бо компанія має оптимізовувати потреби співробітників.</p>
+            `;
+            
+            const спойлери = {          
+                'spoiler-trigger-1': { contentId: 'spoiler-content-1', text: текстІнструкції.trim() },
+                'spoiler-trigger-2': { contentId: 'spoiler-content-2', text: текстЛіцензії.trim() }
+            };
+            
+            let активнийСпойлер = null;
+            document.querySelectorAll('[id^="spoiler-trigger"]').forEach(тригер => {          
+                тригер.addEventListener('click', () => {            
+                    const даніСпойлера = спойлери[тригер.id];            
+                    const контейнерВмісту = document.getElementById(даніСпойлера.contentId);            
+                    const динамічнийВміст = контейнерВмісту.querySelector('.spoiler-dynamic-content');
+                    
+                    // Якщо клікнули на активний спойлер -> закриваємо
+                    if (активнийСпойлер === тригер.id) {              
+                        динамічнийВміст.classList.remove('active');              
+                        контейнерВмісту.classList.remove('open');              
+                        активнийСпойлер = null;              
+                        // Невеликий скрол після закриття
+                        контейнерВмісту.addEventListener('transitionend', function обробник() {                
+                            тригер.scrollIntoView({ behavior: 'smooth', block: 'start' });                
+                            контейнерВмісту.removeEventListener('transitionend', обробник);              
+                        });            
+                    } else {              
+                        // Закриваємо попередній активний
+                        if (активнийСпойлер) {                
+                            const попередніДані = спойлери[активнийСпойлер];                
+                            const попереднійКонтейнер = document.getElementById(попередніДані.contentId);                
+                            const попереднійВміст = попереднійКонтейнер.querySelector('.spoiler-dynamic-content');                
+                            попереднійВміст.classList.remove('active');                
+                            попереднійКонтейнер.classList.remove('open');              
+                        }   
+                        // Відкриваємо новий
+                        динамічнийВміст.innerHTML = даніСпойлера.text;              
+                        контейнерВмісту.classList.add('open');              
+                        динамічнийВміст.classList.add('active');              
+                        активнийСпойлер = тригер.id;                            
+                        // Скрол до відкритого спойлера
+                        контейнерВмісту.addEventListener('transitionend', function обробник() {                
+                            тригер.scrollIntoView({ behavior: 'smooth', block: 'start' });                
+                            контейнерВмісту.removeEventListener('transitionend', обробник);              
+                        });            
+                    }          
+                });        
+            });
+        }
+
+        // Робимо функції доступними в глобальній області видимості для onclick
+        window.змінитиВаріант = змінитиВаріант;
+        window.зберегтиЦінуАксесуара = зберегтиЦінуАксесуара;
+        window.відкритиPdf = відкритиPdf;
+        window.завантажитиPdf = завантажитиPdf;
+        window.редагуватиДату = редагуватиДату; 
+
+        window.onload = function() {
+            // Ініціалізація початкових значень (порожні рядки)
+            КОМПЛЕКТУЮЧІ_ДЛЯ_ПРЕВЬЮ.forEach(комп => {
+                if (!ціниАксесуарів[комп.key]) ціниАксесуарів[комп.key] = '';
+            });
+            // Початкове відображення UI
+            перемалюватиПоляВводуАксесуарів(true);
+            перемалюватиСписок();
+            ініціалізуватиСпойлер();
+        };
+    </script>
+</body>
+</html>
